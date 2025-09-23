@@ -78,21 +78,25 @@ body {
 .btn-success { background: var(--success); color: #07210e; }
 .btn-outline { background: transparent; color: var(--fg); border: 1px solid var(--border); }
 
-/* Nicer navbar with icons and black labels across all themes */
+/* ---- Bottom navbar (stable size across pages) ---- */
 .navbar {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
   width: 100%; max-width: 480px; background: #ffffff;
   border-top: 1px solid var(--border);
   display: grid; grid-template-columns: repeat(4, 1fr);
+  height: 64px; /* fixed height to avoid resizing */
   padding-bottom: env(safe-area-inset-bottom);
 }
+
 .nav-btn {
   padding: 8px 4px; font-size: 11px; color: #000; text-align: center;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   background: transparent; border: none;
+  opacity: 0.9; /* keep consistent weight; avoid resize flicker */
 }
-.nav-btn.active { color: #000; font-weight: 800; }
-.nav-icon { width: 22px; height: 22px; }
+.nav-btn span { line-height: 1; }
+.nav-btn.active { color: #000; opacity: 1; } /* no font-weight change to keep height stable */
+.nav-icon { width: 22px; height: 22px; flex-shrink: 0; }
 
 .list { display: grid; gap: 6px; }
 .item {
