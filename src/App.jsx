@@ -14,7 +14,7 @@ import {
 } from 'firebase/auth'
 import {
   getFirestore,
-  doc, setDoc, deleteDoc,          // ⬅️ added deleteDoc
+  doc, setDoc, deleteDoc,
   collection, addDoc,
   query, where, orderBy, onSnapshot
 } from 'firebase/firestore'
@@ -83,7 +83,7 @@ function Navbar({ tab, setTab }) {
     { key: 'Settings', label: 'Settings', icon: (
       <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.09.11a2 2 0 1 1-3.18 0l-.09-.11a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 0-3.18l.11-.09a1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6l.09-.11a2 2 0 1 1 3.18 0l.09.11a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.64.6 1l.11.09a2 2 0 1 1 0 3.18l-.11.09c-.13.36-.34.7-.6 1z" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.09.11a2 2 0 1 1-3.18 0l-.09-.11a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 1 1 2.83-2.83l.06-.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.64.6 1l.11.09a2 2 0 1 1 0 3.18l-.11.09c-.13.36-.34.7-.6 1z" />
       </svg>
     )},
   ]
@@ -328,8 +328,19 @@ function AnalyticsTab({ uid, categories, currency }) {
   const [tx, setTx] = useState([])
   const [range, setRange] = useState('this') // this or last3
   const [showLine, setShowLine] = useState(false) // compact toggle
+  const [showLeft, setShowLeft] = useState(false) // foldable: left to spend
+  const [catBudgets, setCatBudgets] = useState({}) // budgets for categories
   const analyticsRef = useRef(null)
 
+  // Listen to budgets
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'households', uid, 'settings', 'budget'), (snap) => {
+      if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
+    })
+    return () => unsub()
+  }, [uid])
+
+  // Load transactions for selected range
   useEffect(() => {
     let start, end
     if (range === 'this') {
@@ -353,6 +364,7 @@ function AnalyticsTab({ uid, categories, currency }) {
     return () => unsub()
   }, [uid, monthKey, range])
 
+  // Expense by category for current filter
   const expenseByCat = useMemo(() => {
     const acc = {}; let total = 0
     tx.filter(t=>t.type==='expense').forEach(t => {
@@ -362,6 +374,7 @@ function AnalyticsTab({ uid, categories, currency }) {
     return { acc, total }
   }, [tx])
 
+  // Income/Expense by month for the line chart
   const byMonth = useMemo(() => {
     const acc = {}
     tx.forEach(t => {
@@ -377,7 +390,7 @@ function AnalyticsTab({ uid, categories, currency }) {
     }
   }, [tx])
 
-  // Distinct colors for doughnut ✅
+  // Distinct colors for doughnut
   const palette = ['#2563eb','#22c55e','#ef4444','#eab308','#06b6d4','#a855f7','#f97316','#14b8a6','#84cc16','#ec4899']
   const labelsD = Object.keys(expenseByCat.acc)
   const doughnutData = {
@@ -411,6 +424,29 @@ function AnalyticsTab({ uid, categories, currency }) {
       { label: 'Expense', data: byMonth.expense, tension: 0.3 }
     ]
   }
+
+  // ---- Left to spend (by category) for the selected monthKey ----
+  const expensesThisMonthByCat = useMemo(() => {
+    const map = {}
+    tx.forEach(t => {
+      if (t.type !== 'expense') return
+      if (dayjs(t.date).format('YYYY-MM') !== monthKey) return
+      map[t.category] = (map[t.category] || 0) + Number(t.amount || 0)
+    })
+    return map
+  }, [tx, monthKey])
+
+  const leftByCat = useMemo(() => {
+    const res = {}
+    const cats = new Set([...Object.keys(catBudgets || {}), ...categories])
+    cats.forEach(c => {
+      const budget = Number((catBudgets || {})[c] || 0)
+      if (budget <= 0) return // only show categories with a budget
+      const spent = Number(expensesThisMonthByCat[c] || 0)
+      res[c] = budget - spent
+    })
+    return res
+  }, [catBudgets, expensesThisMonthByCat, categories])
 
   const exportCSV = () => {
     const csv = Papa.unparse(tx.map(t => ({
@@ -460,6 +496,7 @@ function AnalyticsTab({ uid, categories, currency }) {
         <div style={{height:240}}>
           <Doughnut data={doughnutData} options={doughnutOpts} />
         </div>
+
         <div style={{height:16}} />
         <div className="row">
           <h3 style={{margin:0}}>Income vs Expense</h3>
@@ -468,6 +505,27 @@ function AnalyticsTab({ uid, categories, currency }) {
         {showLine && (
           <div className="chart-compact">
             <Line data={lineData} options={{ maintainAspectRatio: false }} />
+          </div>
+        )}
+
+        <div style={{height:16}} />
+        <div className="row">
+          <h3 style={{margin:0}}>Left to Spend (by Category)</h3>
+          <button className="button btn-outline" onClick={()=>setShowLeft(s=>!s)}>{showLeft ? 'Hide' : 'Show'}</button>
+        </div>
+        {showLeft && (
+          <div className="list">
+            {Object.keys(leftByCat).length === 0 && (
+              <p className="small">No category budgets set for {monthKey}.</p>
+            )}
+            {Object.entries(leftByCat).sort(([a],[b]) => a.localeCompare(b)).map(([c, left]) => (
+              <div key={c} className="item">
+                <div style={{fontWeight:700}}>{c}</div>
+                <div className={left >= 0 ? 'amount-pos' : 'amount-neg'}>
+                  {left >= 0 ? '' : '− '}{currencySymbol(currency)}{Math.abs(left).toFixed(2)}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
