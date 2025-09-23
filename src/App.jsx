@@ -14,7 +14,7 @@ import {
 } from 'firebase/auth'
 import {
   getFirestore,
-  doc, setDoc, getDoc,
+  doc, setDoc, deleteDoc,          // ⬅️ added deleteDoc
   collection, addDoc,
   query, where, orderBy, onSnapshot
 } from 'firebase/firestore'
@@ -39,9 +39,7 @@ function useAuth() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
-    return onAuthStateChanged(auth, async (u) => {
-      setUser(u); setLoading(false)
-    })
+    return onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false) })
   }, [])
   return { user, loading }
 }
@@ -51,6 +49,7 @@ function currencySymbol(curr) {
     case 'USD': return '$'
     case 'GBP': return '£'
     case 'EGP': return 'E£'
+    case 'AED': return 'د.إ'
     default: return '€'
   }
 }
@@ -65,11 +64,36 @@ function Header({ currency }) {
 }
 
 function Navbar({ tab, setTab }) {
-  const tabs = ['New','Overview','Analytics','Settings']
+  const items = [
+    { key: 'New', label: 'New', icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    )},
+    { key: 'Overview', label: 'Overview', icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M3 6h18M3 12h18M3 18h18" />
+      </svg>
+    )},
+    { key: 'Analytics', label: 'Analytics', icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 19V5m5 14V10m5 9V7m5 12V3" />
+      </svg>
+    )},
+    { key: 'Settings', label: 'Settings', icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.09.11a2 2 0 1 1-3.18 0l-.09-.11a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 0-3.18l.11-.09a1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6l.09-.11a2 2 0 1 1 3.18 0l.09.11a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.64.6 1l.11.09a2 2 0 1 1 0 3.18l-.11.09c-.13.36-.34.7-.6 1z" />
+      </svg>
+    )},
+  ]
   return (
-    <nav className="navbar">
-      {tabs.map(t => (
-        <button key={t} className={'nav-btn ' + (tab===t ? 'active':'') } onClick={() => setTab(t)}>{t}</button>
+    <nav className="navbar" role="tablist">
+      {items.map(it => (
+        <button key={it.key} className={'nav-btn ' + (tab===it.key ? 'active':'')} onClick={() => setTab(it.key)} role="tab" aria-selected={tab===it.key}>
+          {it.icon}
+          <span>{it.label}</span>
+        </button>
       ))}
     </nav>
   )
@@ -135,20 +159,19 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
   const [date, setDate] = useState(dayjs().format('YYYY-MM-DDTHH:mm'))
   const [note, setNote] = useState('')
   const [leftText, setLeftText] = useState('')
+  const [leftValue, setLeftValue] = useState(null)
 
   const [catBudgets, setCatBudgets] = useState({})
   const monthKey = dayjs(date).format('YYYY-MM')
 
   useEffect(() => {
     const unsub = onSnapshot(budgetsDocRef, (snap) => {
-      if (snap.exists()) {
-        setCatBudgets(snap.data().categoryBudgets || {})
-      }
+      if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
     })
     return () => unsub()
   }, [budgetsDocRef])
 
-  // Compute "Left this month" for selected category
+  // Compute "Left this month" for selected category live
   useEffect(() => {
     if (!category) return
     const start = dayjs(monthKey + '-01').startOf('day').toISOString()
@@ -167,6 +190,7 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
       snap.forEach(doc => { spent += Number(doc.data().amount || 0) })
       const budget = Number(catBudgets[category] || 0)
       const left = budget - spent - Number(amount || 0)
+      setLeftValue(left)
       if (budget > 0) setLeftText(`${currencySymbol(currency)}${left.toFixed(2)} left this month for ${category}`)
       else setLeftText('No budget set for this category.')
     })
@@ -180,7 +204,11 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
       type, amount: Number(amount), category, date: iso, note: note || ''
     })
     setAmount(''); setNote('')
-    alert('Saved')
+    if (type === 'expense' && leftValue !== null) {
+      alert(`Saved. Left this month for ${category}: ${currencySymbol(currency)}${leftValue.toFixed(2)}`)
+    } else {
+      alert('Saved')
+    }
   }
 
   return (
@@ -234,6 +262,12 @@ function OverviewTab({ uid, categories, currency }) {
 
   const filtered = tx.filter(t => (type==='All' || t.type===type) && (cat==='All' || t.category===cat))
 
+  const onDelete = async (id) => {
+    const ok = window.confirm('Delete this entry? This cannot be undone.')
+    if (!ok) return
+    await deleteDoc(doc(db, 'households', uid, 'transactions', id))
+  }
+
   return (
     <div>
       <div className="card">
@@ -263,8 +297,23 @@ function OverviewTab({ uid, categories, currency }) {
               <div style={{fontWeight:700}}>{t.category} • {dayjs(t.date).format('MMM D, HH:mm')}</div>
               {t.note && <div className="note">{t.note}</div>}
             </div>
-            <div className={t.type === 'income' ? 'amount-pos' : 'amount-neg'}>
-              {t.type === 'income' ? '+' : '-'} {currencySymbol(currency)}{Number(t.amount).toFixed(2)}
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <div className={t.type === 'income' ? 'amount-pos' : 'amount-neg'}>
+                {t.type === 'income' ? '+' : '-'} {currencySymbol(currency)}{Number(t.amount).toFixed(2)}
+              </div>
+              <button
+                aria-label="Delete entry"
+                title="Delete"
+                onClick={()=>onDelete(t.id)}
+                style={{background:'transparent', border:'none', color:'var(--muted)', padding:4, cursor:'pointer'}}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
             </div>
           </div>
         ))}
@@ -278,6 +327,7 @@ function AnalyticsTab({ uid, categories, currency }) {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'))
   const [tx, setTx] = useState([])
   const [range, setRange] = useState('this') // this or last3
+  const [showLine, setShowLine] = useState(false) // compact toggle
   const analyticsRef = useRef(null)
 
   useEffect(() => {
@@ -327,10 +377,14 @@ function AnalyticsTab({ uid, categories, currency }) {
     }
   }, [tx])
 
+  // Distinct colors for doughnut ✅
+  const palette = ['#2563eb','#22c55e','#ef4444','#eab308','#06b6d4','#a855f7','#f97316','#14b8a6','#84cc16','#ec4899']
+  const labelsD = Object.keys(expenseByCat.acc)
   const doughnutData = {
-    labels: Object.keys(expenseByCat.acc),
+    labels: labelsD,
     datasets: [{
       data: Object.values(expenseByCat.acc),
+      backgroundColor: labelsD.map((_,i)=> palette[i % palette.length]),
       borderWidth: 0
     }]
   }
@@ -407,8 +461,15 @@ function AnalyticsTab({ uid, categories, currency }) {
           <Doughnut data={doughnutData} options={doughnutOpts} />
         </div>
         <div style={{height:16}} />
-        <h3>Income vs Expense</h3>
-        <Line data={lineData} options={{ maintainAspectRatio: false }} />
+        <div className="row">
+          <h3 style={{margin:0}}>Income vs Expense</h3>
+          <button className="button btn-outline" onClick={()=>setShowLine(s=>!s)}>{showLine ? 'Hide' : 'Show'}</button>
+        </div>
+        {showLine && (
+          <div className="chart-compact">
+            <Line data={lineData} options={{ maintainAspectRatio: false }} />
+          </div>
+        )}
       </div>
 
       <div className="row">
@@ -484,6 +545,7 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
         <option value="USD">USD</option>
         <option value="GBP">GBP</option>
         <option value="EGP">EGP</option>
+        <option value="AED">AED</option>
       </select>
 
       <div style={{height:12}} />
