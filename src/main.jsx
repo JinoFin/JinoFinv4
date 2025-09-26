@@ -5,18 +5,14 @@ import './styles.css'
 import { ToastProvider } from './components/Toast.jsx'
 import { ErrorBoundary } from './components/ErrorBoundary.jsx'
 
-// Apply theme from localStorage (default 'dark')
-const savedTheme = localStorage.getItem('theme')
-if (savedTheme) {
-  document.documentElement.setAttribute('data-theme', savedTheme)
-} else {
-  document.documentElement.setAttribute('data-theme', 'dark')
-}
-
-// Set CSS variable for nav height
-document.documentElement.style.setProperty('--nav-height', '72px')
-
 const rootElement = document.getElementById('root')
+
+// Apply saved theme (default to 'dark')
+const savedTheme = localStorage.getItem('theme')
+document.documentElement.setAttribute('data-theme', savedTheme || 'dark')
+
+// Fixed navbar height for layout spacing
+document.documentElement.style.setProperty('--nav-height', '72px')
 
 createRoot(rootElement).render(
   <React.StrictMode>
