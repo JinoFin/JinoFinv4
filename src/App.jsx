@@ -319,7 +319,7 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
         {categories.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       <div style={{height:8}} />
-      <input className="input" type="number" inputMode="decimal" placeholder="Amount" value={amount} onChange={e=>setAmount(e.target.value)} />
+      <input   className="input"   type="text"   inputMode="decimal"   placeholder="Amount"   value={amount}   onChange={e => {     // normalize comma to dot     const val = e.target.value.replace(',', '.')     setAmount(val)   }} />
       <div style={{height:8}} />
       <input className="input" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
       <div style={{height:8}} />
