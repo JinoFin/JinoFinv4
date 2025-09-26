@@ -252,7 +252,7 @@ function HelpSheet({ onClose }) {
   )
 }
 
-/* ---------------- Core Tabs ---------------- */
+/* ---------------- New tab (robust amount parsing) ---------------- */
 function NewTab({ uid, categories, currency, budgetsDocRef }) {
   const [type, setType] = useState('expense')
   const [category, setCategory] = useState(categories[0] || 'Other')
@@ -269,7 +269,7 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
     if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
   }), [budgetsDocRef])
 
-  // --- locale-friendly amount parsing ---
+  // Normalize locale amount strings (accepts "," and ".", handles "1.234,56" and "1,234.56")
   const normalizeAmountString = (val) => {
     if (val == null) return ''
     let v = String(val).trim().replace(/\s/g, '')
@@ -337,7 +337,7 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
         {categories.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       <div style={{height:8}} />
-      {/* decimal keypad + comma/dot friendly */}
+      {/* Locale-friendly amount: accepts "," or "."; shows numeric keypad */}
       <input
         className="input"
         type="text"
@@ -360,12 +360,14 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
   )
 }
 
+/* ---------------- Overview (filters, delete, CSV import) ---------------- */
 function OverviewTab({ uid, categories, currency }) {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'))
   const [type, setType] = useState('All')
   const [cat, setCat] = useState('All')
   const [tx, setTx] = useState([])
   const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
+
   const fileRef = useRef(null) // for CSV import
 
   useEffect(() => {
@@ -390,12 +392,12 @@ function OverviewTab({ uid, categories, currency }) {
     await deleteDoc(doc(db, 'households', uid, 'transactions', id))
   }
 
-  // ---- CSV Import ----
+  // CSV import helpers
   const parseDateToISO = (val) => {
-    if (val == null || val === '') return null
-    const fmts = ['YYYY-MM-DD', 'YYYY/MM/DD', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DDTHH:mm', 'YYYY-MM-DD HH:mm']
-    for (const f of fmts) {
-      const d = dayjs(val, f, true)
+    if (!val && val !== 0) return null
+    const candidates = ['YYYY-MM-DD', 'YYYY/MM/DD', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DDTHH:mm', 'YYYY-MM-DD HH:mm']
+    for (const fmt of candidates) {
+      const d = dayjs(val, fmt, true)
       if (d.isValid()) return d.toISOString()
     }
     const d2 = dayjs(val)
@@ -420,10 +422,21 @@ function OverviewTab({ uid, categories, currency }) {
           const newCats = new Set()
 
           for (const r of rows) {
+            // case-insensitive headers
             const get = (k) => r[k] ?? r[k?.toLowerCase?.()] ?? r[k?.toUpperCase?.()]
             let type = (get('type') || '').toString().toLowerCase().trim()
-            let amountRaw = (get('amount') ?? '').toString().replace(',', '.').trim()
-            let amount = Number(amountRaw)
+            let amountRaw = (get('amount') ?? '').toString().trim()
+            // normalize amount (accept 1.234,56 and 1,234.56)
+            const normalize = (val) => {
+              let v = String(val).replace(/\s/g,'')
+              const both = v.includes(',') && v.includes('.')
+              if (both) v = v.replace(/\./g,'').replace(',', '.')
+              else v = v.replace(',', '.')
+              v = v.replace(/[^0-9.]/g,'')
+              const parts = v.split('.'); if (parts.length > 2) v = parts.shift()+'.'+parts.join('')
+              return v
+            }
+            let amount = Number(parseFloat(normalize(amountRaw)))
             let category = (get('category') || 'Other').toString().trim()
             const dateISO = parseDateToISO(get('date'))
             const note = (get('note') || '').toString().trim()
@@ -433,6 +446,7 @@ function OverviewTab({ uid, categories, currency }) {
               type = amount < 0 ? 'expense' : 'income'
               amount = Math.abs(amount)
             }
+
             if (!['income','expense'].includes(type)) { skipped++; continue }
             if (!Number.isFinite(amount) || amount <= 0) { skipped++; continue }
             if (!dateISO) { skipped++; continue }
@@ -446,7 +460,6 @@ function OverviewTab({ uid, categories, currency }) {
           }
 
           if (!ok) { alert('No valid rows to import.'); e.target.value = ''; return }
-
           const proceed = window.confirm(`Ready to import ${ok} rows${skipped ? ` (${skipped} skipped)` : ''}?`)
           if (!proceed) { e.target.value = ''; return }
 
@@ -461,7 +474,7 @@ function OverviewTab({ uid, categories, currency }) {
         } catch (err) {
           alert(err.message || 'Failed to import CSV.')
         } finally {
-          e.target.value = ''
+          e.target.value = '' // reset
         }
       },
       error: (err) => {
@@ -492,6 +505,7 @@ function OverviewTab({ uid, categories, currency }) {
           </select>
         </div>
         <div style={{height:8}} />
+        {/* Import CSV */}
         <div className="row">
           <button className="button btn-outline" onClick={handleImportClick}>Import CSV</button>
           <input
@@ -533,6 +547,7 @@ function OverviewTab({ uid, categories, currency }) {
   )
 }
 
+/* ---------------- Analytics (charts, left-to-spend, export) ---------------- */
 function AnalyticsTab({ uid, categories, currency }) {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'))
   const [tx, setTx] = useState([])
@@ -697,6 +712,7 @@ function AnalyticsTab({ uid, categories, currency }) {
   )
 }
 
+/* ---------------- Settings (themes, currency, budgets, account) ---------------- */
 function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) {
   const [theme, setTheme] = useState(document.documentElement.getAttribute('data-theme') || 'dark')
   const [totalBudget, setTotalBudget] = useState(2000)
@@ -836,7 +852,7 @@ export default function App() {
   const [showSignUp, setShowSignUp] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
 
-  // ⬇️ Add this block
+  // Theme persistence (before Firestore effect)
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme')
     if (storedTheme) {
@@ -844,7 +860,7 @@ export default function App() {
     }
   }, [])
 
-  // Existing Firestore subscription (keep it after the theme effect)
+  // Firestore subscription
   useEffect(() => {
     if (!user) return
     const unsub = onSnapshot(doc(db, 'households', user.uid), (snap) => {
@@ -857,11 +873,14 @@ export default function App() {
     return () => unsub()
   }, [user])
 
-  if (loading) return <div className="app"><Header currency={'EUR'} /><div className="content"><p>Loading…</p></div></div>
-
-  // ...
-}
-
+  if (loading) {
+    return (
+      <div className="app">
+        <Header currency={'EUR'} />
+        <div className="content"><p>Loading…</p></div>
+      </div>
+    )
+  }
 
   // Signed-out: Welcome + Sign in + Sign up + Help
   if (!user) {
