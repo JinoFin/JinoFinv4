@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
+import customParseFormat from 'dayjs/plugin/customParseFormat'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import Papa from 'papaparse'
@@ -21,7 +22,8 @@ import {
   getFirestore,
   doc, setDoc, deleteDoc,
   collection, addDoc,
-  query, where, orderBy, onSnapshot
+  query, where, orderBy, onSnapshot,
+  writeBatch
 } from 'firebase/firestore'
 
 import {
@@ -32,14 +34,18 @@ import { Doughnut, Line } from 'react-chartjs-2'
 
 import { firebaseConfig } from './firebaseConfig'
 
+dayjs.extend(customParseFormat)
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
 
+/* ---------------- Firebase init ---------------- */
 const app = initializeApp(firebaseConfig)
 const auth = getAuth(app)
 const db = getFirestore(app)
 
+/* ---------------- Constants ---------------- */
 const DEFAULT_CATEGORIES = ['Groceries','Dining','Transport','Rent','Utilities','Shopping','Health','Other']
 
+/* ---------------- Helpers ---------------- */
 function useAuth() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -134,19 +140,13 @@ function SignInCard({ onContinue }) {
   const handle = async () => {
     setError('')
     try {
-      // Sign-in ONLY. (Creation is handled in Sign Up form.)
-      await signInWithEmailAndPassword(auth, email, password)
+      await signInWithEmailAndPassword(auth, email, password) // sign-in only
       onContinue && onContinue()
     } catch (e) {
-      if (e.code === 'auth/invalid-credential') {
-        setError('Incorrect email or password.')
-      } else if (e.code === 'auth/invalid-email') {
-        setError('Invalid email.')
-      } else if (e.code === 'auth/operation-not-allowed') {
-        setError('Email/password sign-in is disabled in Firebase Console.')
-      } else {
-        setError(e.message || 'Sign-in failed.')
-      }
+      if (e.code === 'auth/invalid-credential') setError('Incorrect email or password.')
+      else if (e.code === 'auth/invalid-email') setError('Invalid email.')
+      else if (e.code === 'auth/operation-not-allowed') setError('Email/password sign-in is disabled in Firebase Console.')
+      else setError(e.message || 'Sign-in failed.')
     }
   }
 
@@ -186,9 +186,7 @@ function SignUpSheet({ onClose }) {
     if (!email || !password) { setError('Email and password required.'); return }
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password)
-      if (name) {
-        await updateProfile(cred.user, { displayName: name })
-      }
+      if (name) await updateProfile(cred.user, { displayName: name })
       await seedDefaults(cred.user.uid)
       onClose && onClose()
     } catch (e) {
@@ -271,6 +269,24 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
     if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
   }), [budgetsDocRef])
 
+  // --- locale-friendly amount parsing ---
+  const normalizeAmountString = (val) => {
+    if (val == null) return ''
+    let v = String(val).trim().replace(/\s/g, '')
+    const hasComma = v.includes(',')
+    const hasDot = v.includes('.')
+    if (hasComma && hasDot) v = v.replace(/\./g, '').replace(',', '.')
+    else v = v.replace(',', '.')
+    v = v.replace(/[^0-9.]/g, '')
+    const parts = v.split('.')
+    if (parts.length > 2) v = parts.shift() + '.' + parts.join('')
+    return v
+  }
+  const parseAmountNumber = (val) => {
+    const n = parseFloat(normalizeAmountString(val))
+    return Number.isFinite(n) ? n : NaN
+  }
+
   useEffect(() => {
     if (!category) return
     const start = dayjs(monthKey + '-01').startOf('day').toISOString()
@@ -287,7 +303,8 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
       let spent = 0
       snap.forEach(doc => { spent += Number(doc.data().amount || 0) })
       const budget = Number(catBudgets[category] || 0)
-      const left = budget - spent - Number(amount || 0)
+      const pending = parseAmountNumber(amount) || 0
+      const left = budget - spent - pending
       setLeftValue(left)
       if (budget > 0) setLeftText(`${currencySymbol(currency)}${left.toFixed(2)} left this month for ${category}`)
       else setLeftText('No budget set for this category.')
@@ -295,10 +312,11 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
   }, [uid, category, amount, monthKey, currency, catBudgets])
 
   const save = async () => {
-    if (!amount || Number(amount) <= 0) return alert('Enter a valid amount')
+    const amt = parseAmountNumber(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return alert('Enter a valid amount')
     const iso = dayjs(date).toISOString()
     await addDoc(collection(db, 'households', uid, 'transactions'), {
-      type, amount: Number(amount), category, date: iso, note: note || ''
+      type, amount: amt, category, date: iso, note: note || ''
     })
     setAmount(''); setNote('')
     if (type === 'expense' && leftValue !== null) {
@@ -319,7 +337,17 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
         {categories.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       <div style={{height:8}} />
-      <input   className="input"   type="text"   inputMode="decimal"   placeholder="Amount"   value={amount}   onChange={e => {     // normalize comma to dot     const val = e.target.value.replace(',', '.')     setAmount(val)   }} />
+      {/* decimal keypad + comma/dot friendly */}
+      <input
+        className="input"
+        type="text"
+        inputMode="decimal"
+        pattern="[0-9]*[.,]?[0-9]*"
+        placeholder="Amount"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        onBlur={(e) => setAmount(normalizeAmountString(e.target.value))}
+      />
       <div style={{height:8}} />
       <input className="input" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
       <div style={{height:8}} />
@@ -338,6 +366,7 @@ function OverviewTab({ uid, categories, currency }) {
   const [cat, setCat] = useState('All')
   const [tx, setTx] = useState([])
   const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
+  const fileRef = useRef(null) // for CSV import
 
   useEffect(() => {
     const start = dayjs(monthKey + '-01').startOf('day').toISOString()
@@ -361,6 +390,87 @@ function OverviewTab({ uid, categories, currency }) {
     await deleteDoc(doc(db, 'households', uid, 'transactions', id))
   }
 
+  // ---- CSV Import ----
+  const parseDateToISO = (val) => {
+    if (val == null || val === '') return null
+    const fmts = ['YYYY-MM-DD', 'YYYY/MM/DD', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DDTHH:mm', 'YYYY-MM-DD HH:mm']
+    for (const f of fmts) {
+      const d = dayjs(val, f, true)
+      if (d.isValid()) return d.toISOString()
+    }
+    const d2 = dayjs(val)
+    return d2.isValid() ? d2.toISOString() : null
+  }
+
+  const handleImportClick = () => fileRef.current?.click()
+
+  const onFileSelected = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const rows = results.data || []
+          if (!rows.length) { alert('No rows found in CSV.'); return }
+          const batch = writeBatch(db)
+          const colRef = collection(db, 'households', uid, 'transactions')
+          let ok = 0, skipped = 0
+          const newCats = new Set()
+
+          for (const r of rows) {
+            const get = (k) => r[k] ?? r[k?.toLowerCase?.()] ?? r[k?.toUpperCase?.()]
+            let type = (get('type') || '').toString().toLowerCase().trim()
+            let amountRaw = (get('amount') ?? '').toString().replace(',', '.').trim()
+            let amount = Number(amountRaw)
+            let category = (get('category') || 'Other').toString().trim()
+            const dateISO = parseDateToISO(get('date'))
+            const note = (get('note') || '').toString().trim()
+
+            if (!type) {
+              if (!Number.isFinite(amount)) { skipped++; continue }
+              type = amount < 0 ? 'expense' : 'income'
+              amount = Math.abs(amount)
+            }
+            if (!['income','expense'].includes(type)) { skipped++; continue }
+            if (!Number.isFinite(amount) || amount <= 0) { skipped++; continue }
+            if (!dateISO) { skipped++; continue }
+            if (!category) category = 'Other'
+
+            const newRef = doc(colRef)
+            batch.set(newRef, { type, amount, category, date: dateISO, note })
+
+            if (!categories.includes(category)) newCats.add(category)
+            ok++
+          }
+
+          if (!ok) { alert('No valid rows to import.'); e.target.value = ''; return }
+
+          const proceed = window.confirm(`Ready to import ${ok} rows${skipped ? ` (${skipped} skipped)` : ''}?`)
+          if (!proceed) { e.target.value = ''; return }
+
+          await batch.commit()
+
+          if (newCats.size) {
+            const updated = [...new Set([...categories, ...Array.from(newCats)])]
+            await setDoc(doc(db, 'households', uid), { categories: updated }, { merge: true })
+          }
+
+          alert(`Imported ${ok} rows${skipped ? ` (${skipped} skipped)` : ''}.`)
+        } catch (err) {
+          alert(err.message || 'Failed to import CSV.')
+        } finally {
+          e.target.value = ''
+        }
+      },
+      error: (err) => {
+        alert(err.message || 'Failed to parse CSV.')
+        e.target.value = ''
+      }
+    })
+  }
+
   return (
     <div>
       <div className="card">
@@ -380,6 +490,17 @@ function OverviewTab({ uid, categories, currency }) {
             <option>All</option>
             {categories.map(c => <option key={c}>{c}</option>)}
           </select>
+        </div>
+        <div style={{height:8}} />
+        <div className="row">
+          <button className="button btn-outline" onClick={handleImportClick}>Import CSV</button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={onFileSelected}
+          />
         </div>
       </div>
 
@@ -503,6 +624,8 @@ function AnalyticsTab({ uid, categories, currency }) {
     return res
   }, [catBudgets, expensesThisMonthByCat, categories])
 
+  const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
+
   const exportCSV = () => {
     const csv = Papa.unparse(tx.map(t => ({ type: t.type, amount: t.amount, category: t.category, date: t.date, note: t.note })))
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -517,8 +640,6 @@ function AnalyticsTab({ uid, categories, currency }) {
     const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height); const w = canvas.width * ratio; const h = canvas.height * ratio
     pdf.addImage(imgData, 'PNG', (pageWidth - w)/2, 10, w, h); pdf.save(`jinofin-analytics-${dayjs().format('YYYYMMDD-HHmm')}.pdf`)
   }
-
-  const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
 
   return (
     <div>
@@ -635,12 +756,10 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
       setSavingAcc(true)
       const user = auth.currentUser
       if (!user) throw new Error('No user.')
-      // Update display name
       if (displayName !== user.displayName) {
         await updateProfile(user, { displayName })
         await setDoc(doc(db, 'households', uid), { name: displayName }, { merge: true })
       }
-      // Email or password changes require reauth
       if ((email && email !== user.email) || newPw) await reauth()
       if (email && email !== user.email) await updateEmail(user, email)
       if (newPw) await updatePassword(user, newPw)
@@ -717,6 +836,15 @@ export default function App() {
   const [showSignUp, setShowSignUp] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
 
+  // ⬇️ Add this block
+  useEffect(() => {
+    const storedTheme = localStorage.getItem('theme')
+    if (storedTheme) {
+      document.documentElement.setAttribute('data-theme', storedTheme)
+    }
+  }, [])
+
+  // Existing Firestore subscription (keep it after the theme effect)
   useEffect(() => {
     if (!user) return
     const unsub = onSnapshot(doc(db, 'households', user.uid), (snap) => {
@@ -731,7 +859,11 @@ export default function App() {
 
   if (loading) return <div className="app"><Header currency={'EUR'} /><div className="content"><p>Loading…</p></div></div>
 
-  // Signed-out: show Welcome with Sign in card + Sign up + Help
+  // ...
+}
+
+
+  // Signed-out: Welcome + Sign in + Sign up + Help
   if (!user) {
     return (
       <>
