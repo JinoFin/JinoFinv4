@@ -10,7 +10,12 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut
+  signOut,
+  updateProfile,
+  updateEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider
 } from 'firebase/auth'
 import {
   getFirestore,
@@ -38,9 +43,7 @@ const DEFAULT_CATEGORIES = ['Groceries','Dining','Transport','Rent','Utilities',
 function useAuth() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
-  useEffect(() => {
-    return onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false) })
-  }, [])
+  useEffect(() => onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false) }), [])
   return { user, loading }
 }
 
@@ -54,6 +57,7 @@ function currencySymbol(curr) {
   }
 }
 
+/* ---------------- UI primitives ---------------- */
 function Header({ currency }) {
   return (
     <div className="header">
@@ -83,7 +87,7 @@ function Navbar({ tab, setTab }) {
     { key: 'Settings', label: 'Settings', icon: (
       <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.09.11a2 2 0 1 1-3.18 0l-.09-.11a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 1 1 2.83-2.83l.06-.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.64.6 1l.11.09a2 2 0 1 1 0 3.18l-.11.09c-.13.36-.34.7-.6 1z" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6l-.09.11a2 2 0 1 1-3.18 0l-.09-.11a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 0-3.18l.11-.09a1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.6-1l-.11-.09a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6l.09-.11a2 2 0 1 1 3.18 0l.09.11a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.64.6 1l.11.09a2 2 0 1 1 0 3.18l-.11.09c-.13.36-.34.7-.6 1z" />
       </svg>
     )},
   ]
@@ -99,59 +103,158 @@ function Navbar({ tab, setTab }) {
   )
 }
 
-function SignIn() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-
-  const handleContinue = async () => {
-    setError('')
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-    } catch (e) {
-      if (e.code === 'auth/user-not-found') {
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, email, password)
-          const uid = cred.user.uid
-          // Seed defaults
-          await setDoc(doc(db, 'households', uid), {
-            categories: DEFAULT_CATEGORIES,
-            currency: 'EUR',
-            totalBudget: 2000
-          })
-          await setDoc(doc(db, 'households', uid, 'settings', 'budget'), {
-            totalBudget: 2000,
-            categoryBudgets: {},
-            currency: 'EUR'
-          })
-        } catch (e2) {
-          setError(e2.message)
-        }
-      } else {
-        setError(e.message)
-      }
-    }
-  }
-
+/* ---------------- Auth: Welcome / Sign In / Sign Up / Help ---------------- */
+function Welcome({ onContinueSignIn, onShowSignUp, onShowHelp }) {
   return (
     <div className="app">
       <Header currency={'EUR'} />
       <div className="content">
-        <div className="card">
-          <h3>Welcome</h3>
-          <p className="small">Email/Password only. Tap Continue to sign in; if you don't have an account, we'll create it and seed defaults.</p>
-          <input className="input" placeholder="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} />
-          <div style={{ height: 8 }} />
-          <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-          <div style={{ height: 12 }} />
-          <button className="button" onClick={handleContinue}>Continue</button>
-          {error && <p className="small" style={{color: 'var(--danger)'}}>{error}</p>}
+        <div className="hero">
+          <div className="hero-logo">J</div>
+          <h1>Welcome to JinoFin</h1>
+          <p>Track spending fast. Budgets, analytics, and exports—on your phone.</p>
+        </div>
+
+        <SignInCard onContinue={onContinueSignIn} />
+
+        <div className="row">
+          <button className="button btn-outline" onClick={onShowSignUp}>Sign up</button>
+          <button className="button btn-outline" onClick={onShowHelp}>Help</button>
         </div>
       </div>
     </div>
   )
 }
 
+function SignInCard({ onContinue }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const handle = async () => {
+    setError('')
+    try {
+      // Sign-in ONLY. (Creation is handled in Sign Up form.)
+      await signInWithEmailAndPassword(auth, email, password)
+      onContinue && onContinue()
+    } catch (e) {
+      if (e.code === 'auth/invalid-credential') {
+        setError('Incorrect email or password.')
+      } else if (e.code === 'auth/invalid-email') {
+        setError('Invalid email.')
+      } else if (e.code === 'auth/operation-not-allowed') {
+        setError('Email/password sign-in is disabled in Firebase Console.')
+      } else {
+        setError(e.message || 'Sign-in failed.')
+      }
+    }
+  }
+
+  return (
+    <div className="card">
+      <h3>Sign in</h3>
+      <input className="input" placeholder="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} />
+      <div style={{ height: 8 }} />
+      <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+      <div style={{ height: 12 }} />
+      <button className="button" onClick={handle}>Continue</button>
+      {error && <p className="small" style={{color:'var(--danger)'}}>{error}</p>}
+    </div>
+  )
+}
+
+function SignUpSheet({ onClose }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const seedDefaults = async (uid) => {
+    await setDoc(doc(db, 'households', uid), {
+      categories: DEFAULT_CATEGORIES,
+      currency: 'EUR',
+      totalBudget: 2000,
+      ...(name ? { name } : {})
+    })
+    await setDoc(doc(db, 'households', uid, 'settings', 'budget'), {
+      totalBudget: 2000, categoryBudgets: {}, currency: 'EUR'
+    })
+  }
+
+  const submit = async () => {
+    setError('')
+    if (!email || !password) { setError('Email and password required.'); return }
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password)
+      if (name) {
+        await updateProfile(cred.user, { displayName: name })
+      }
+      await seedDefaults(cred.user.uid)
+      onClose && onClose()
+    } catch (e) {
+      if (e.code === 'auth/email-already-in-use') setError('Email already in use. Try signing in.')
+      else if (e.code === 'auth/invalid-email') setError('Invalid email.')
+      else if (e.code === 'auth/weak-password') setError('Weak password. Use 6+ characters.')
+      else setError(e.message || 'Sign-up failed.')
+    }
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={e=>e.stopPropagation()}>
+        <h3>Create account</h3>
+        <input className="input" placeholder="Name (optional)" value={name} onChange={e=>setName(e.target.value)} />
+        <div style={{height:8}} />
+        <input className="input" placeholder="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} />
+        <div style={{height:8}} />
+        <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        <div style={{height:12}} />
+        <div className="row">
+          <button className="button btn-outline" onClick={onClose}>Cancel</button>
+          <button className="button" onClick={submit}>Sign up</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HelpSheet({ onClose }) {
+  const [i, setI] = useState(0)
+  const slides = [
+    { title: 'Add income & expenses fast', text: 'Big buttons. Category, amount, date, note. One tap to save.' },
+    { title: 'Budgets & “left this month”', text: 'Set per-category budgets and see remaining instantly.' },
+    { title: 'Overview, Analytics & Export', text: 'Filter months, view charts, and export CSV/PDF. Themes & currencies too.' },
+  ]
+  const next = () => setI((i+1) % slides.length)
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={e=>e.stopPropagation()}>
+        <h3>Welcome to JinoFin</h3>
+        <div className="carousel">
+          {slides.map((s,idx)=>(
+            <div key={idx} className={'slide ' + (i===idx?'active':'')}>
+              <div>
+                <h4 style={{margin:'4px 0 6px'}}>{s.title}</h4>
+                <p className="small">{s.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="dots">
+          {slides.map((_,idx)=><div key={idx} className={'dot ' + (i===idx?'active':'')}/>)}
+        </div>
+        <div style={{height:12}} />
+        <div className="row">
+          <button className="button btn-outline" onClick={onClose}>Close</button>
+          <button className="button" onClick={next}>Next</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Core Tabs ---------------- */
 function NewTab({ uid, categories, currency, budgetsDocRef }) {
   const [type, setType] = useState('expense')
   const [category, setCategory] = useState(categories[0] || 'Other')
@@ -164,19 +267,14 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
   const [catBudgets, setCatBudgets] = useState({})
   const monthKey = dayjs(date).format('YYYY-MM')
 
-  useEffect(() => {
-    const unsub = onSnapshot(budgetsDocRef, (snap) => {
-      if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
-    })
-    return () => unsub()
-  }, [budgetsDocRef])
+  useEffect(() => onSnapshot(budgetsDocRef, (snap) => {
+    if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
+  }), [budgetsDocRef])
 
-  // Compute "Left this month" for selected category live
   useEffect(() => {
     if (!category) return
     const start = dayjs(monthKey + '-01').startOf('day').toISOString()
     const end = dayjs(monthKey).endOf('month').endOf('day').toISOString()
-
     const q = query(
       collection(db, 'households', uid, 'transactions'),
       where('date', '>=', start),
@@ -185,7 +283,7 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
       where('category', '==', category),
       orderBy('date', 'desc')
     )
-    const unsub = onSnapshot(q, (snap) => {
+    return onSnapshot(q, (snap) => {
       let spent = 0
       snap.forEach(doc => { spent += Number(doc.data().amount || 0) })
       const budget = Number(catBudgets[category] || 0)
@@ -194,7 +292,6 @@ function NewTab({ uid, categories, currency, budgetsDocRef }) {
       if (budget > 0) setLeftText(`${currencySymbol(currency)}${left.toFixed(2)} left this month for ${category}`)
       else setLeftText('No budget set for this category.')
     })
-    return () => unsub()
   }, [uid, category, amount, monthKey, currency, catBudgets])
 
   const save = async () => {
@@ -240,24 +337,20 @@ function OverviewTab({ uid, categories, currency }) {
   const [type, setType] = useState('All')
   const [cat, setCat] = useState('All')
   const [tx, setTx] = useState([])
-
   const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
 
   useEffect(() => {
     const start = dayjs(monthKey + '-01').startOf('day').toISOString()
     const end = dayjs(monthKey).endOf('month').endOf('day').toISOString()
-    let qRef = query(
+    const qRef = query(
       collection(db, 'households', uid, 'transactions'),
       where('date', '>=', start),
       where('date', '<=', end),
       orderBy('date', 'desc')
     )
-    const unsub = onSnapshot(qRef, (snap) => {
-      let list = []
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }))
-      setTx(list)
+    return onSnapshot(qRef, (snap) => {
+      const list = []; snap.forEach(d => list.push({ id: d.id, ...d.data() })); setTx(list)
     })
-    return () => unsub()
   }, [uid, monthKey])
 
   const filtered = tx.filter(t => (type==='All' || t.type===type) && (cat==='All' || t.category===cat))
@@ -301,12 +394,8 @@ function OverviewTab({ uid, categories, currency }) {
               <div className={t.type === 'income' ? 'amount-pos' : 'amount-neg'}>
                 {t.type === 'income' ? '+' : '-'} {currencySymbol(currency)}{Number(t.amount).toFixed(2)}
               </div>
-              <button
-                aria-label="Delete entry"
-                title="Delete"
-                onClick={()=>onDelete(t.id)}
-                style={{background:'transparent', border:'none', color:'var(--muted)', padding:4, cursor:'pointer'}}
-              >
+              <button aria-label="Delete entry" title="Delete" onClick={()=>onDelete(t.id)}
+                style={{background:'transparent', border:'none', color:'var(--muted)', padding:4, cursor:'pointer'}}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -326,21 +415,16 @@ function OverviewTab({ uid, categories, currency }) {
 function AnalyticsTab({ uid, categories, currency }) {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'))
   const [tx, setTx] = useState([])
-  const [range, setRange] = useState('this') // this or last3
-  const [showLine, setShowLine] = useState(false) // compact toggle
-  const [showLeft, setShowLeft] = useState(false) // foldable: left to spend
-  const [catBudgets, setCatBudgets] = useState({}) // budgets for categories
+  const [range, setRange] = useState('this')
+  const [showLine, setShowLine] = useState(false)
+  const [showLeft, setShowLeft] = useState(false)
+  const [catBudgets, setCatBudgets] = useState({})
   const analyticsRef = useRef(null)
 
-  // Listen to budgets
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'households', uid, 'settings', 'budget'), (snap) => {
-      if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
-    })
-    return () => unsub()
-  }, [uid])
+  useEffect(() => onSnapshot(doc(db, 'households', uid, 'settings', 'budget'), (snap) => {
+    if (snap.exists()) setCatBudgets(snap.data().categoryBudgets || {})
+  }), [uid])
 
-  // Load transactions for selected range
   useEffect(() => {
     let start, end
     if (range === 'this') {
@@ -356,15 +440,11 @@ function AnalyticsTab({ uid, categories, currency }) {
       where('date', '<=', end.toISOString()),
       orderBy('date', 'desc')
     )
-    const unsub = onSnapshot(qRef, (snap) => {
-      let list = []
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }))
-      setTx(list)
+    return onSnapshot(qRef, (snap) => {
+      const list = []; snap.forEach(d => list.push({ id: d.id, ...d.data() })); setTx(list)
     })
-    return () => unsub()
   }, [uid, monthKey, range])
 
-  // Expense by category for current filter
   const expenseByCat = useMemo(() => {
     const acc = {}; let total = 0
     tx.filter(t=>t.type==='expense').forEach(t => {
@@ -374,7 +454,6 @@ function AnalyticsTab({ uid, categories, currency }) {
     return { acc, total }
   }, [tx])
 
-  // Income/Expense by month for the line chart
   const byMonth = useMemo(() => {
     const acc = {}
     tx.forEach(t => {
@@ -383,49 +462,25 @@ function AnalyticsTab({ uid, categories, currency }) {
       acc[mk][t.type] += Number(t.amount||0)
     })
     const labels = Object.keys(acc).sort()
-    return {
-      labels,
-      income: labels.map(l => acc[l].income),
-      expense: labels.map(l => acc[l].expense)
-    }
+    return { labels, income: labels.map(l => acc[l].income), expense: labels.map(l => acc[l].expense) }
   }, [tx])
 
-  // Distinct colors for doughnut
   const palette = ['#2563eb','#22c55e','#ef4444','#eab308','#06b6d4','#a855f7','#f97316','#14b8a6','#84cc16','#ec4899']
   const labelsD = Object.keys(expenseByCat.acc)
-  const doughnutData = {
-    labels: labelsD,
-    datasets: [{
-      data: Object.values(expenseByCat.acc),
-      backgroundColor: labelsD.map((_,i)=> palette[i % palette.length]),
-      borderWidth: 0
-    }]
-  }
+  const doughnutData = { labels: labelsD, datasets: [{ data: Object.values(expenseByCat.acc), backgroundColor: labelsD.map((_,i)=> palette[i % palette.length]), borderWidth: 0 }] }
   const doughnutOpts = {
-    plugins: {
-      tooltip: {
-        callbacks: {
-          label: (ctx) => {
-            const value = ctx.raw || 0
-            const pct = expenseByCat.total ? (value/expenseByCat.total*100).toFixed(1) : 0
-            return `${ctx.label}: ${currencySymbol(currency)}${value.toFixed(2)} • ${pct}%`
-          }
-        }
-      },
-      legend: { position: 'bottom' }
-    },
+    plugins: { tooltip: { callbacks: { label: (ctx) => {
+      const value = ctx.raw || 0
+      const pct = expenseByCat.total ? (value/expenseByCat.total*100).toFixed(1) : 0
+      return `${ctx.label}: ${currencySymbol(currency)}${value.toFixed(2)} • ${pct}%`
+    }}}, legend: { position: 'bottom' } },
     maintainAspectRatio: false
   }
+  const lineData = { labels: byMonth.labels, datasets: [
+    { label: 'Income', data: byMonth.income, tension: 0.3 },
+    { label: 'Expense', data: byMonth.expense, tension: 0.3 }
+  ]}
 
-  const lineData = {
-    labels: byMonth.labels,
-    datasets: [
-      { label: 'Income', data: byMonth.income, tension: 0.3 },
-      { label: 'Expense', data: byMonth.expense, tension: 0.3 }
-    ]
-  }
-
-  // ---- Left to spend (by category) for the selected monthKey ----
   const expensesThisMonthByCat = useMemo(() => {
     const map = {}
     tx.forEach(t => {
@@ -441,7 +496,7 @@ function AnalyticsTab({ uid, categories, currency }) {
     const cats = new Set([...Object.keys(catBudgets || {}), ...categories])
     cats.forEach(c => {
       const budget = Number((catBudgets || {})[c] || 0)
-      if (budget <= 0) return // only show categories with a budget
+      if (budget <= 0) return
       const spent = Number(expensesThisMonthByCat[c] || 0)
       res[c] = budget - spent
     })
@@ -449,29 +504,18 @@ function AnalyticsTab({ uid, categories, currency }) {
   }, [catBudgets, expensesThisMonthByCat, categories])
 
   const exportCSV = () => {
-    const csv = Papa.unparse(tx.map(t => ({
-      type: t.type, amount: t.amount, category: t.category, date: t.date, note: t.note
-    })))
+    const csv = Papa.unparse(tx.map(t => ({ type: t.type, amount: t.amount, category: t.category, date: t.date, note: t.note })))
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `jinofin-${dayjs().format('YYYYMMDD-HHmm')}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    const url = URL.createObjectURL(blob); const a = document.createElement('a')
+    a.href = url; a.download = `jinofin-${dayjs().format('YYYYMMDD-HHmm')}.csv`; a.click(); URL.revokeObjectURL(url)
   }
 
   const exportPDF = async () => {
     const node = analyticsRef.current
-    const canvas = await html2canvas(node, { scale: 2 })
-    const imgData = canvas.toDataURL('image/png')
-    const pdf = new jsPDF('p', 'mm', 'a4')
-    const pageWidth = pdf.internal.pageSize.getWidth()
-    const pageHeight = pdf.internal.pageSize.getHeight()
-    const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height)
-    const w = canvas.width * ratio
-    const h = canvas.height * ratio
-    pdf.addImage(imgData, 'PNG', (pageWidth - w)/2, 10, w, h)
-    pdf.save(`jinofin-analytics-${dayjs().format('YYYYMMDD-HHmm')}.pdf`)
+    const canvas = await html2canvas(node, { scale: 2 }); const imgData = canvas.toDataURL('image/png')
+    const pdf = new jsPDF('p', 'mm', 'a4'); const pageWidth = pdf.internal.pageSize.getWidth(); const pageHeight = pdf.internal.pageSize.getHeight()
+    const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height); const w = canvas.width * ratio; const h = canvas.height * ratio
+    pdf.addImage(imgData, 'PNG', (pageWidth - w)/2, 10, w, h); pdf.save(`jinofin-analytics-${dayjs().format('YYYYMMDD-HHmm')}.pdf`)
   }
 
   const months = [...Array(4)].map((_,i)=> dayjs().subtract(i, 'month').format('YYYY-MM'))
@@ -502,11 +546,7 @@ function AnalyticsTab({ uid, categories, currency }) {
           <h3 style={{margin:0}}>Income vs Expense</h3>
           <button className="button btn-outline" onClick={()=>setShowLine(s=>!s)}>{showLine ? 'Hide' : 'Show'}</button>
         </div>
-        {showLine && (
-          <div className="chart-compact">
-            <Line data={lineData} options={{ maintainAspectRatio: false }} />
-          </div>
-        )}
+        {showLine && <div className="chart-compact"><Line data={lineData} options={{ maintainAspectRatio: false }} /></div>}
 
         <div style={{height:16}} />
         <div className="row">
@@ -515,9 +555,7 @@ function AnalyticsTab({ uid, categories, currency }) {
         </div>
         {showLeft && (
           <div className="list">
-            {Object.keys(leftByCat).length === 0 && (
-              <p className="small">No category budgets set for {monthKey}.</p>
-            )}
+            {Object.keys(leftByCat).length === 0 && <p className="small">No category budgets set for {monthKey}.</p>}
             {Object.entries(leftByCat).sort(([a],[b]) => a.localeCompare(b)).map(([c, left]) => (
               <div key={c} className="item">
                 <div style={{fontWeight:700}}>{c}</div>
@@ -542,6 +580,11 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
   const [theme, setTheme] = useState(document.documentElement.getAttribute('data-theme') || 'dark')
   const [totalBudget, setTotalBudget] = useState(2000)
   const [catBudgets, setCatBudgets] = useState({})
+  const [displayName, setDisplayName] = useState(auth.currentUser?.displayName || '')
+  const [email, setEmail] = useState(auth.currentUser?.email || '')
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [savingAcc, setSavingAcc] = useState(false)
 
   useEffect(() => {
     const unsubMain = onSnapshot(doc(db, 'households', uid), (snap) => {
@@ -562,18 +605,12 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
   }, [uid])
 
   const applyTheme = (t) => {
-    setTheme(t)
-    document.documentElement.setAttribute('data-theme', t)
-    localStorage.setItem('theme', t)
+    setTheme(t); document.documentElement.setAttribute('data-theme', t); localStorage.setItem('theme', t)
   }
 
   const saveMain = async () => {
-    await setDoc(doc(db, 'households', uid), {
-      categories, currency, totalBudget
-    }, { merge: true })
-    await setDoc(doc(db, 'households', uid, 'settings', 'budget'), {
-      totalBudget, categoryBudgets: catBudgets, currency
-    }, { merge: true })
+    await setDoc(doc(db, 'households', uid), { categories, currency, totalBudget }, { merge: true })
+    await setDoc(doc(db, 'households', uid, 'settings', 'budget'), { totalBudget, categoryBudgets: catBudgets, currency }, { merge: true })
     alert('Saved settings')
   }
 
@@ -584,8 +621,36 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
     setCategories([...categories, name])
   }
 
-  const setCatBudget = (c, v) => {
-    setCatBudgets(prev => ({ ...prev, [c]: Number(v)||0 }))
+  const setCatBudget = (c, v) => setCatBudgets(prev => ({ ...prev, [c]: Number(v)||0 }))
+
+  const reauth = async () => {
+    const user = auth.currentUser
+    if (!user?.email || !currentPw) throw new Error('Current password required.')
+    const cred = EmailAuthProvider.credential(user.email, currentPw)
+    await reauthenticateWithCredential(user, cred)
+  }
+
+  const saveAccount = async () => {
+    try {
+      setSavingAcc(true)
+      const user = auth.currentUser
+      if (!user) throw new Error('No user.')
+      // Update display name
+      if (displayName !== user.displayName) {
+        await updateProfile(user, { displayName })
+        await setDoc(doc(db, 'households', uid), { name: displayName }, { merge: true })
+      }
+      // Email or password changes require reauth
+      if ((email && email !== user.email) || newPw) await reauth()
+      if (email && email !== user.email) await updateEmail(user, email)
+      if (newPw) await updatePassword(user, newPw)
+      alert('Account updated.')
+      setCurrentPw(''); setNewPw('')
+    } catch (e) {
+      alert(e.message || 'Failed to update account.')
+    } finally {
+      setSavingAcc(false)
+    }
   }
 
   return (
@@ -596,6 +661,7 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
         <button className={'button ' + (theme==='light'?'':'btn-outline')} onClick={()=>applyTheme('light')}>Light</button>
         <button className={'button ' + (theme==='playful'?'':'btn-outline')} onClick={()=>applyTheme('playful')}>Playful</button>
       </div>
+
       <div style={{height:12}} />
       <h3>Currency</h3>
       <select className="input" value={currency} onChange={e=>setCurrency(e.target.value)}>
@@ -622,17 +688,34 @@ function SettingsTab({ uid, currency, setCurrency, categories, setCategories }) 
         <button className="button btn-outline" onClick={addCategory}>Add Category</button>
         <button className="button" onClick={saveMain}>Save</button>
       </div>
+
       <div style={{height:12}} />
-      <button className="button btn-outline" onClick={()=>signOut(auth)}>Sign out</button>
+      <h3>Account</h3>
+      <input className="input" placeholder="Display name" value={displayName} onChange={e=>setDisplayName(e.target.value)} />
+      <div style={{height:8}} />
+      <input className="input" placeholder="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} />
+      <div style={{height:8}} />
+      <input className="input" placeholder="Current password (for email/password changes)" type="password" value={currentPw} onChange={e=>setCurrentPw(e.target.value)} />
+      <div style={{height:8}} />
+      <input className="input" placeholder="New password (optional)" type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} />
+      <div style={{height:8}} />
+      <div className="row">
+        <button className="button btn-outline" disabled={savingAcc} onClick={()=>signOut(auth)}>Sign out</button>
+        <button className="button" disabled={savingAcc} onClick={saveAccount}>{savingAcc ? 'Saving…' : 'Save account'}</button>
+      </div>
     </div>
   )
 }
 
+/* ---------------- App ---------------- */
 export default function App() {
   const { user, loading } = useAuth()
   const [tab, setTab] = useState('New')
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES)
   const [currency, setCurrency] = useState('EUR')
+
+  const [showSignUp, setShowSignUp] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -647,8 +730,23 @@ export default function App() {
   }, [user])
 
   if (loading) return <div className="app"><Header currency={'EUR'} /><div className="content"><p>Loading…</p></div></div>
-  if (!user) return <SignIn />
 
+  // Signed-out: show Welcome with Sign in card + Sign up + Help
+  if (!user) {
+    return (
+      <>
+        <Welcome
+          onContinueSignIn={()=>{}}
+          onShowSignUp={()=>setShowSignUp(true)}
+          onShowHelp={()=>setShowHelp(true)}
+        />
+        {showSignUp && <SignUpSheet onClose={()=>setShowSignUp(false)} />}
+        {showHelp && <HelpSheet onClose={()=>setShowHelp(false)} />}
+      </>
+    )
+  }
+
+  // Signed-in: main app
   return (
     <div className="app">
       <Header currency={currency} />
