@@ -38,15 +38,12 @@ body {
   background: var(--bg); color: var(--fg);
 }
 
-.app {
-  max-width: 480px; margin: 0 auto; min-height: 100%;
-  display: flex; flex-direction: column;
-}
+.app { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
 
 .header {
   position: sticky; top: 0; z-index: 10;
   background: var(--bg); border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: env(safe-area-inset-top) 12px 12px 12px;
 }
 
@@ -84,18 +81,15 @@ body {
   width: 100%; max-width: 480px; background: #ffffff;
   border-top: 1px solid var(--border);
   display: grid; grid-template-columns: repeat(4, 1fr);
-  height: 64px; /* fixed height to avoid resizing */
-  padding-bottom: env(safe-area-inset-bottom);
+  height: 64px; padding-bottom: env(safe-area-inset-bottom);
 }
-
 .nav-btn {
   padding: 8px 4px; font-size: 11px; color: #000; text-align: center;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  background: transparent; border: none;
-  opacity: 0.9; /* keep consistent weight; avoid resize flicker */
+  background: transparent; border: none; opacity: 0.9;
 }
 .nav-btn span { line-height: 1; }
-.nav-btn.active { color: #000; opacity: 1; } /* no font-weight change to keep height stable */
+.nav-btn.active { color: #000; opacity: 1; }
 .nav-icon { width: 22px; height: 22px; flex-shrink: 0; }
 
 .list { display: grid; gap: 6px; }
@@ -120,3 +114,40 @@ footer { height: 64px; }
 
 /* Compact chart helper */
 .chart-compact { height: 180px; }
+
+/* ---- Welcome / Onboarding ---- */
+.hero {
+  text-align: center; padding: 32px 12px;
+}
+.hero-logo {
+  width: 72px; height: 72px; border-radius: 16px; background: #000; color: #fff; display: inline-flex;
+  align-items: center; justify-content: center; font-weight: 900; font-size: 36px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.hero h1 { margin: 16px 0 8px; }
+.hero p { margin: 0; color: var(--muted); }
+
+.link {
+  background: transparent; border: none; color: var(--accent); text-decoration: underline;
+  font-size: 14px; padding: 6px 4px; cursor: pointer;
+}
+
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 50;
+}
+.sheet {
+  width: 100%; max-width: 480px; background: var(--card); border-top: 1px solid var(--border);
+  border-top-left-radius: 16px; border-top-right-radius: 16px; padding: 16px; animation: slideUp .25s ease;
+}
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.carousel { overflow: hidden; position: relative; height: 160px; margin: 12px 0; }
+.slide {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 0 12px; opacity: 0; transform: translateX(10px); transition: opacity .25s ease, transform .25s ease;
+}
+.slide.active { opacity: 1; transform: translateX(0); }
+.dots { display: flex; gap: 6px; justify-content: center; margin: 8px 0 0; }
+.dot { width: 6px; height: 6px; border-radius: 999px; background: var(--border); }
+.dot.active { background: var(--accent); }
